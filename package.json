@@ -1,0 +1,115 @@
+{
+  "name": "@truelist/nextjs",
+  "version": "0.1.0",
+  "description": "Email validation for Next.js — Server Actions, Edge Middleware, and Zod integration powered by Truelist.io",
+  "license": "MIT",
+  "author": "Truelist <support@truelist.io>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Truelist-io-Email-Validation/truelist-nextjs.git"
+  },
+  "homepage": "https://truelist.io",
+  "bugs": {
+    "url": "https://github.com/Truelist-io-Email-Validation/truelist-nextjs/issues"
+  },
+  "keywords": [
+    "nextjs",
+    "next",
+    "email",
+    "email-validation",
+    "email-verification",
+    "truelist",
+    "server-actions",
+    "middleware",
+    "zod",
+    "edge"
+  ],
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./server": {
+      "import": {
+        "types": "./dist/server.d.ts",
+        "default": "./dist/server.js"
+      },
+      "require": {
+        "types": "./dist/server.d.cts",
+        "default": "./dist/server.cjs"
+      }
+    },
+    "./middleware": {
+      "import": {
+        "types": "./dist/middleware.d.ts",
+        "default": "./dist/middleware.js"
+      },
+      "require": {
+        "types": "./dist/middleware.d.cts",
+        "default": "./dist/middleware.cjs"
+      }
+    },
+    "./zod": {
+      "import": {
+        "types": "./dist/zod.d.ts",
+        "default": "./dist/zod.js"
+      },
+      "require": {
+        "types": "./dist/zod.d.cts",
+        "default": "./dist/zod.cjs"
+      }
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ --ext .ts",
+    "ci": "npm run typecheck && npm run lint",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "truelist": "^1.0.0"
+  },
+  "peerDependencies": {
+    "next": ">=14.0.0",
+    "react": ">=18.0.0",
+    "zod": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "@types/react": "^18.2.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^8.57.0",
+    "next": "^14.0.0",
+    "react": "^18.2.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0",
+    "zod": "^3.22.0"
+  }
+}
