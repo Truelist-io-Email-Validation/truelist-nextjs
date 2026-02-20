@@ -1,5 +1,5 @@
 import { z } from "zod";
-import Truelist from "truelist";
+import Truelist, { AuthenticationError } from "truelist";
 import type { ValidationState } from "truelist";
 
 const DEFAULT_API_KEY_ENV = "TRUELIST_API_KEY";
@@ -92,7 +92,10 @@ export function truelistEmail(options?: TruelistEmailOptions) {
           const client = new Truelist(apiKey, { baseUrl });
           const result = await client.email.validate(email);
           return !rejectedStates.has(result.state);
-        } catch {
+        } catch (error) {
+          if (error instanceof AuthenticationError) {
+            throw error;
+          }
           return true;
         }
       },

@@ -14,6 +14,7 @@ import type {
   ValidateFormSubmissionOptions,
   EmailValidationErrorResponse,
 } from "./types";
+import { AuthenticationError } from "truelist";
 import type { ValidationResult, ValidationSubState } from "truelist";
 
 const DEFAULT_BASE_URL = "https://api.truelist.io";
@@ -72,6 +73,9 @@ async function formVerify(
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        throw new AuthenticationError();
+      }
       const text = await response.text().catch(() => "");
       throw new Error(
         `Truelist API error: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`
@@ -261,7 +265,10 @@ export function createValidationHandler(
 
       // Email passed validation
       return null;
-    } catch {
+    } catch (error) {
+      if (error instanceof AuthenticationError) {
+        throw error;
+      }
       // If the Truelist API is unreachable or timed out, don't block the request
       return null;
     }
