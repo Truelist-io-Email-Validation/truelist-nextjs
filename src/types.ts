@@ -9,6 +9,8 @@ export type {
   ValidationSubState,
 } from "truelist";
 
+import type { ValidationState, ValidationSubState } from "truelist";
+
 /**
  * Configuration options for server-side email validation.
  */
@@ -22,10 +24,10 @@ export type ValidateEmailConfig = {
 };
 
 /**
- * Configuration for the Edge Middleware email validation helper.
+ * Configuration for the Route Handler email validation helper.
  */
-export type EmailValidationMiddlewareConfig = {
-  /** Route paths to intercept (e.g. `["/api/signup", "/api/contact"]`). */
+export type EmailValidationHandlerConfig = {
+  /** Route path prefixes to validate (e.g. `["/api/signup", "/api/contact"]`). */
   paths: string[];
   /** The form field name containing the email. Default: `"email"`. */
   fieldName?: string;
@@ -37,28 +39,32 @@ export type EmailValidationMiddlewareConfig = {
   apiKey?: string;
   /** Base URL for the Truelist API. Defaults to `https://api.truelist.io`. */
   baseUrl?: string;
+  /** Timeout in milliseconds for the API call. Default: `10000` (10s). */
+  timeout?: number;
 };
 
 /**
- * Configuration for the lower-level `validateEmailMiddleware` function.
+ * Configuration for the lower-level `validateFormSubmission` function.
  */
-export type ValidateEmailMiddlewareOptions = {
+export type ValidateFormSubmissionOptions = {
   /** The form field name containing the email. Default: `"email"`. */
   fieldName?: string;
   /** Your Truelist API key. Defaults to `process.env.TRUELIST_API_KEY`. */
   apiKey?: string;
   /** Base URL for the Truelist API. Defaults to `https://api.truelist.io`. */
   baseUrl?: string;
+  /** Timeout in milliseconds for the API call. Default: `10000` (10s). */
+  timeout?: number;
 };
 
 /**
  * The result returned by the `validateEmail` server helper.
- * Extends `ValidationResult` with a convenience `isValid` flag.
+ * Extends the core SDK's `ValidationResult` with a convenience `isValid` flag.
  */
 export type EmailValidationResult = {
   email: string;
-  state: "valid" | "invalid" | "risky" | "unknown";
-  subState: string;
+  state: ValidationState;
+  subState: ValidationSubState;
   freeEmail: boolean;
   role: boolean;
   disposable: boolean;
@@ -68,7 +74,7 @@ export type EmailValidationResult = {
 };
 
 /**
- * Error details returned by the middleware when an email is rejected.
+ * Error details returned by the route handler when an email is rejected.
  */
 export type EmailValidationErrorResponse = {
   error: string;

@@ -34,6 +34,9 @@ export type TruelistEmailOptions = {
  *
  * Designed for use in Server Actions with Zod form validation.
  *
+ * **Important**: If the API key is missing, validation will throw an error
+ * rather than silently passing. Only transient network/API errors fail open.
+ *
  * @example
  * ```ts
  * import { z } from "zod";
@@ -76,19 +79,20 @@ export function truelistEmail(options?: TruelistEmailOptions) {
     .email("Please enter a valid email address.")
     .refine(
       async (email) => {
-        try {
-          const apiKey = configApiKey ?? process.env[DEFAULT_API_KEY_ENV];
-          if (!apiKey) {
-            throw new Error(
-              `Truelist API key is required. Set the ${DEFAULT_API_KEY_ENV} environment variable or pass { apiKey } in options.`
-            );
-          }
+        // Check API key FIRST — this must throw, not be caught
+        const apiKey = configApiKey ?? process.env[DEFAULT_API_KEY_ENV];
+        if (!apiKey) {
+          throw new Error(
+            `Truelist API key is required. Set the ${DEFAULT_API_KEY_ENV} environment variable or pass { apiKey } in options.`
+          );
+        }
 
+        // Only catch transient network/API errors (fail-open)
+        try {
           const client = new Truelist(apiKey, { baseUrl });
           const result = await client.email.validate(email);
           return !rejectedStates.has(result.state);
         } catch {
-          // If the API is unavailable, don't block form submission
           return true;
         }
       },

@@ -1,15 +1,17 @@
 /**
- * Edge Middleware helpers for validating email fields in form submissions.
+ * Route Handler helpers for validating email fields in form submissions.
  *
- * Uses raw `fetch` (no Node.js-specific APIs) so it works in the Edge Runtime.
+ * Uses raw `fetch` (no Node.js-specific APIs) so it stays Edge-compatible
+ * if used inside an Edge Route Handler.
+ *
  * Calls the `/api/v1/form_verify` endpoint (60 req/min rate limit).
  */
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import type {
-  EmailValidationMiddlewareConfig,
-  ValidateEmailMiddlewareOptions,
+  EmailValidationHandlerConfig,
+  ValidateFormSubmissionOptions,
   EmailValidationErrorResponse,
 } from "./types";
 import type { ValidationResult, ValidationSubState } from "truelist";
@@ -17,6 +19,7 @@ import type { ValidationResult, ValidationSubState } from "truelist";
 const DEFAULT_BASE_URL = "https://api.truelist.io";
 const DEFAULT_FIELD_NAME = "email";
 const DEFAULT_API_KEY_ENV = "TRUELIST_API_KEY";
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 /**
  * Raw API response from the form_verify endpoint.
@@ -44,55 +47,66 @@ function getApiKey(configApiKey?: string): string {
 
 /**
  * Call the Truelist form_verify endpoint using raw fetch (Edge-compatible).
+ * Includes an AbortController timeout to prevent hanging requests.
  */
 async function formVerify(
   email: string,
   apiKey: string,
-  baseUrl: string
+  baseUrl: string,
+  timeoutMs: number
 ): Promise<ValidationResult> {
   const url = `${baseUrl}/api/v1/form_verify`;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ email }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(
-      `Truelist API error: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`
-    );
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ email }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `Truelist API error: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`
+      );
+    }
+
+    const data: ApiFormVerifyResponse =
+      (await response.json()) as ApiFormVerifyResponse;
+
+    return {
+      email: data.email,
+      state: data.state,
+      subState: data.sub_state,
+      freeEmail: data.free_email,
+      role: data.role,
+      disposable: data.disposable,
+      suggestion: data.suggestion,
+    };
+  } finally {
+    clearTimeout(timer);
   }
-
-  const data: ApiFormVerifyResponse = await response.json() as ApiFormVerifyResponse;
-
-  return {
-    email: data.email,
-    state: data.state,
-    subState: data.sub_state,
-    freeEmail: data.free_email,
-    role: data.role,
-    disposable: data.disposable,
-    suggestion: data.suggestion,
-  };
 }
 
 /**
- * Extract the email from a cloned request body (JSON or FormData).
+ * Extract the email from a request body (JSON or FormData).
  */
 async function extractEmail(
-  request: NextRequest,
+  request: Request,
   fieldName: string
 ): Promise<string | null> {
   const contentType = request.headers.get("content-type") ?? "";
 
   if (contentType.includes("application/json")) {
     try {
-      const body = await request.json() as Record<string, unknown>;
+      const body = (await request.json()) as Record<string, unknown>;
       const value = body[fieldName];
       return typeof value === "string" ? value : null;
     } catch {
@@ -117,19 +131,20 @@ async function extractEmail(
 }
 
 /**
- * Lower-level middleware helper that validates an email from the request
- * and returns the `ValidationResult` (or `null` if no email was found).
+ * Validate an email from a Request body and return the `ValidationResult`
+ * (or `null` if no email was found).
  *
- * Use this when you want full control over the response.
+ * Works in both Node.js and Edge Route Handlers.
  *
  * @example
  * ```ts
- * import { validateEmailMiddleware } from "@truelist/nextjs/middleware";
+ * // app/api/signup/route.ts
+ * import { validateFormSubmission } from "@truelist/nextjs/middleware";
  * import { NextResponse } from "next/server";
  * import type { NextRequest } from "next/server";
  *
- * export async function middleware(request: NextRequest) {
- *   const result = await validateEmailMiddleware(request, { fieldName: "email" });
+ * export async function POST(request: NextRequest) {
+ *   const result = await validateFormSubmission(request, { fieldName: "email" });
  *
  *   if (result?.state === "invalid") {
  *     return NextResponse.json(
@@ -138,57 +153,63 @@ async function extractEmail(
  *     );
  *   }
  *
- *   return NextResponse.next();
+ *   // Continue processing the form...
+ *   return NextResponse.json({ success: true });
  * }
- *
- * export const config = {
- *   matcher: ["/api/signup", "/api/contact"],
- * };
  * ```
  */
-export async function validateEmailMiddleware(
-  request: NextRequest,
-  options?: ValidateEmailMiddlewareOptions
+export async function validateFormSubmission(
+  request: Request,
+  options?: ValidateFormSubmissionOptions
 ): Promise<ValidationResult | null> {
   const fieldName = options?.fieldName ?? DEFAULT_FIELD_NAME;
   const apiKey = getApiKey(options?.apiKey);
   const baseUrl = (options?.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const timeoutMs = options?.timeout ?? DEFAULT_TIMEOUT_MS;
 
   const email = await extractEmail(request, fieldName);
   if (!email) {
     return null;
   }
 
-  return formVerify(email, apiKey, baseUrl);
+  return formVerify(email, apiKey, baseUrl, timeoutMs);
 }
 
 /**
- * Create a complete Next.js Edge Middleware that validates email fields
- * in POST requests to the specified paths.
+ * Create a Next.js Route Handler (POST) that validates email fields
+ * in requests to matching paths.
  *
  * Invalid emails receive a 422 JSON response. Valid/risky/unknown emails
- * pass through to the next handler.
+ * pass through to the next handler via `NextResponse.next()`.
+ *
+ * Uses `pathname.startsWith()` for path matching so nested routes are covered.
  *
  * @example
  * ```ts
- * // middleware.ts
- * import { withEmailValidation } from "@truelist/nextjs/middleware";
+ * // app/api/signup/route.ts
+ * import { createValidationHandler } from "@truelist/nextjs/middleware";
+ * import { NextResponse } from "next/server";
+ * import type { NextRequest } from "next/server";
  *
- * export default withEmailValidation({
- *   paths: ["/api/signup", "/api/contact"],
- *   fieldName: "email",
+ * const validate = createValidationHandler({
+ *   paths: ["/api/signup"],
  *   rejectInvalid: true,
  *   rejectRisky: false,
  * });
  *
- * export const config = {
- *   matcher: ["/api/signup", "/api/contact"],
- * };
+ * export async function POST(request: NextRequest) {
+ *   const blocked = await validate(request);
+ *   if (blocked) return blocked; // 422 response
+ *
+ *   // Email is valid — continue with your logic
+ *   const body = await request.json();
+ *   return NextResponse.json({ success: true });
+ * }
  * ```
  */
-export function withEmailValidation(
-  config: EmailValidationMiddlewareConfig
-): (request: NextRequest) => Promise<NextResponse> {
+export function createValidationHandler(
+  config: EmailValidationHandlerConfig
+): (request: NextRequest) => Promise<NextResponse | null> {
   const {
     paths,
     fieldName = DEFAULT_FIELD_NAME,
@@ -196,28 +217,30 @@ export function withEmailValidation(
     rejectRisky = false,
     apiKey: configApiKey,
     baseUrl: configBaseUrl,
+    timeout: configTimeout,
   } = config;
 
-  const pathSet = new Set(paths);
-
-  return async (request: NextRequest): Promise<NextResponse> => {
-    // Only intercept POST requests to specified paths
-    if (request.method !== "POST" || !pathSet.has(request.nextUrl.pathname)) {
-      return NextResponse.next();
+  return async (request: NextRequest): Promise<NextResponse | null> => {
+    // Only validate if the pathname matches one of the configured paths
+    const pathname = request.nextUrl.pathname;
+    const matches = paths.some((path) => pathname.startsWith(path));
+    if (!matches) {
+      return null;
     }
 
     const apiKey = getApiKey(configApiKey);
     const baseUrl = (configBaseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+    const timeoutMs = configTimeout ?? DEFAULT_TIMEOUT_MS;
 
     const email = await extractEmail(request, fieldName);
 
     // No email found in the request body — pass through
     if (!email) {
-      return NextResponse.next();
+      return null;
     }
 
     try {
-      const result = await formVerify(email, apiKey, baseUrl);
+      const result = await formVerify(email, apiKey, baseUrl, timeoutMs);
 
       const rejectedStates = new Set<string>();
       if (rejectInvalid) rejectedStates.add("invalid");
@@ -236,10 +259,11 @@ export function withEmailValidation(
         return NextResponse.json(errorBody, { status: 422 });
       }
 
-      return NextResponse.next();
+      // Email passed validation
+      return null;
     } catch {
-      // If the Truelist API is unreachable, don't block the request
-      return NextResponse.next();
+      // If the Truelist API is unreachable or timed out, don't block the request
+      return null;
     }
   };
 }

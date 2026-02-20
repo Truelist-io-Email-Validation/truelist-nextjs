@@ -1,6 +1,6 @@
 # @truelist/nextjs
 
-Email validation for Next.js -- Server Actions, Edge Middleware, and Zod integration powered by [Truelist.io](https://truelist.io).
+Email validation for Next.js -- Server Actions, Route Handlers, and Zod integration powered by [Truelist.io](https://truelist.io).
 
 [![npm version](https://img.shields.io/npm/v/@truelist/nextjs.svg)](https://www.npmjs.com/package/@truelist/nextjs)
 [![CI](https://github.com/Truelist-io-Email-Validation/truelist-nextjs/actions/workflows/ci.yml/badge.svg)](https://github.com/Truelist-io-Email-Validation/truelist-nextjs/actions/workflows/ci.yml)
@@ -87,31 +87,36 @@ export async function signup(formData: FormData) {
 }
 ```
 
-## Edge Middleware
+## Route Handler Helpers
 
-Validate email fields in form submissions at the edge before they reach your route handlers.
+Validate email fields in form submissions inside your Route Handlers. Works in both Node.js and Edge runtimes.
 
-### `withEmailValidation(config)`
+### `createValidationHandler(config)`
 
-Creates a complete middleware function that intercepts POST requests and validates email fields.
+Creates a validation function you call at the top of your Route Handler. Returns a `NextResponse` (422) if the email is rejected, or `null` if it passes.
 
 ```ts
-// middleware.ts
-import { withEmailValidation } from "@truelist/nextjs/middleware";
+// app/api/signup/route.ts
+import { createValidationHandler } from "@truelist/nextjs/middleware";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
-export default withEmailValidation({
-  paths: ["/api/signup", "/api/contact"],
-  fieldName: "email",        // default
+const validate = createValidationHandler({
+  paths: ["/api/signup"],
   rejectInvalid: true,       // return 422 for invalid emails (default)
   rejectRisky: false,        // also reject risky emails (default: false)
 });
 
-export const config = {
-  matcher: ["/api/signup", "/api/contact"],
-};
+export async function POST(request: NextRequest) {
+  const blocked = await validate(request);
+  if (blocked) return blocked; // 422 response
+
+  // Email passed validation - continue with your logic
+  return NextResponse.json({ success: true });
+}
 ```
 
-When an invalid email is detected, the middleware returns:
+When an invalid email is detected, the handler returns:
 
 ```json
 {
@@ -126,20 +131,30 @@ When an invalid email is detected, the middleware returns:
 
 with HTTP status `422 Unprocessable Entity`.
 
-Valid, risky (unless `rejectRisky: true`), and unknown emails pass through to your route handler.
+#### Config Options
 
-### `validateEmailMiddleware(request, options?)`
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `paths` | `string[]` | (required) | Route path prefixes to validate (uses `startsWith` matching) |
+| `fieldName` | `string` | `"email"` | Form field name containing the email |
+| `rejectInvalid` | `boolean` | `true` | Return 422 for `"invalid"` emails |
+| `rejectRisky` | `boolean` | `false` | Also reject `"risky"` emails |
+| `apiKey` | `string` | `process.env.TRUELIST_API_KEY` | API key override |
+| `baseUrl` | `string` | `https://api.truelist.io` | API base URL override |
+| `timeout` | `number` | `10000` | Fetch timeout in milliseconds |
 
-Lower-level helper for custom middleware logic. Returns the `ValidationResult` or `null`.
+### `validateFormSubmission(request, options?)`
+
+Lower-level helper for custom Route Handler logic. Returns the `ValidationResult` or `null`.
 
 ```ts
-// middleware.ts
-import { validateEmailMiddleware } from "@truelist/nextjs/middleware";
+// app/api/signup/route.ts
+import { validateFormSubmission } from "@truelist/nextjs/middleware";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export async function middleware(request: NextRequest) {
-  const result = await validateEmailMiddleware(request, {
+export async function POST(request: NextRequest) {
+  const result = await validateFormSubmission(request, {
     fieldName: "email",
   });
 
@@ -157,12 +172,8 @@ export async function middleware(request: NextRequest) {
     );
   }
 
-  return NextResponse.next();
+  return NextResponse.json({ success: true });
 }
-
-export const config = {
-  matcher: ["/api/signup"],
-};
 ```
 
 ## Zod Integration
@@ -170,6 +181,8 @@ export const config = {
 ### `truelistEmail(options?)`
 
 Creates a Zod string schema with async email validation via Truelist. Designed for Server Action form validation.
+
+**Important**: If the API key is missing, validation throws an error rather than silently passing. Only transient network/API errors fail open.
 
 ```ts
 import { z } from "zod";
@@ -203,7 +216,7 @@ truelistEmail({
 
 The Zod schema reads `process.env.TRUELIST_API_KEY` automatically -- no need to pass it for standard setups.
 
-If the Truelist API is unreachable, validation passes through (fail-open) to avoid blocking form submissions.
+If the Truelist API is unreachable, validation passes through (fail-open) to avoid blocking form submissions. However, a missing API key will always throw an error.
 
 ## Configuration
 
@@ -220,7 +233,7 @@ All functions accept an `apiKey` config option to override the environment varia
 | Module | Endpoint | Rate Limit | Runtime |
 |--------|----------|------------|---------|
 | `@truelist/nextjs/server` | `POST /api/v1/verify` | 10 req/s | Node.js |
-| `@truelist/nextjs/middleware` | `POST /api/v1/form_verify` | 60 req/min | Edge |
+| `@truelist/nextjs/middleware` | `POST /api/v1/form_verify` | 60 req/min | Node.js or Edge |
 | `@truelist/nextjs/zod` | `POST /api/v1/verify` | 10 req/s | Node.js |
 
 ## Types
@@ -231,8 +244,8 @@ All types are exported from the main entry point and individual subpaths:
 import type {
   // Next.js-specific
   ValidateEmailConfig,
-  EmailValidationMiddlewareConfig,
-  ValidateEmailMiddlewareOptions,
+  EmailValidationHandlerConfig,
+  ValidateFormSubmissionOptions,
   EmailValidationResult,
   EmailValidationErrorResponse,
 

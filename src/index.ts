@@ -1,8 +1,8 @@
 // Server Action helpers
 export { validateEmail, createEmailValidator } from "./server";
 
-// Middleware helpers
-export { withEmailValidation, validateEmailMiddleware } from "./middleware";
+// Route Handler helpers
+export { createValidationHandler, validateFormSubmission } from "./middleware";
 
 // Zod integration
 export { truelistEmail } from "./zod";
@@ -10,8 +10,8 @@ export { truelistEmail } from "./zod";
 // Types
 export type {
   ValidateEmailConfig,
-  EmailValidationMiddlewareConfig,
-  ValidateEmailMiddlewareOptions,
+  EmailValidationHandlerConfig,
+  ValidateFormSubmissionOptions,
   EmailValidationResult,
   EmailValidationErrorResponse,
 } from "./types";
