@@ -14,10 +14,10 @@ function getApiKey(config?: ValidateEmailConfig): string {
 }
 
 /**
- * Validate an email address using the Truelist server-side API (`/api/v1/verify`).
+ * Validate an email address using the Truelist server-side API (`POST /api/v1/verify_inline`).
  *
  * Reads the API key from `process.env.TRUELIST_API_KEY` by default.
- * Returns an `EmailValidationResult` with a convenience `isValid` flag.
+ * Returns an `EmailValidationResult` with convenience flags.
  *
  * Designed for use inside Next.js Server Actions and Route Handlers.
  *
@@ -45,29 +45,32 @@ export async function validateEmail(
   });
 
   const result = await client.email.validate(email);
-  const rejectRisky = config?.rejectRisky ?? false;
-
-  const rejectedStates = new Set<string>(["invalid"]);
-  if (rejectRisky) {
-    rejectedStates.add("risky");
-  }
+  const rejectStates = new Set<string>(
+    config?.rejectStates ?? ["email_invalid"]
+  );
 
   return {
     email: result.email,
+    domain: result.domain,
+    canonical: result.canonical,
+    mxRecord: result.mxRecord,
+    firstName: result.firstName,
+    lastName: result.lastName,
     state: result.state,
     subState: result.subState,
-    freeEmail: result.freeEmail,
-    role: result.role,
-    disposable: result.disposable,
+    verifiedAt: result.verifiedAt,
     suggestion: result.suggestion,
-    isValid: !rejectedStates.has(result.state),
+    isValid: !rejectStates.has(result.state),
+    isInvalid: result.state === "email_invalid",
+    isDisposable: result.subState === "is_disposable",
+    isRole: result.subState === "is_role",
   };
 }
 
 /**
  * Create a pre-configured email validator function.
  *
- * Useful when you want to set `rejectRisky`, a custom API key, or other
+ * Useful when you want to set `rejectStates`, a custom API key, or other
  * options once and reuse the validator across multiple Server Actions.
  *
  * @example
@@ -75,7 +78,7 @@ export async function validateEmail(
  * import { createEmailValidator } from "@truelist/nextjs/server";
  *
  * const validate = createEmailValidator({
- *   rejectRisky: true,
+ *   rejectStates: ["email_invalid", "risky"],
  * });
  *
  * // In a Server Action:

@@ -9,7 +9,7 @@ export type {
   ValidationSubState,
 } from "truelist";
 
-import type { ValidationState, ValidationSubState } from "truelist";
+import type { ValidationState } from "truelist";
 
 /**
  * Configuration options for server-side email validation.
@@ -19,8 +19,11 @@ export type ValidateEmailConfig = {
   apiKey?: string;
   /** Base URL for the Truelist API. Defaults to `https://api.truelist.io`. */
   baseUrl?: string;
-  /** Treat "risky" emails as invalid. Default: `false`. */
-  rejectRisky?: boolean;
+  /**
+   * Which validation states to reject (mark as invalid).
+   * Default: `["email_invalid"]`
+   */
+  rejectStates?: ValidationState[];
 };
 
 /**
@@ -31,10 +34,11 @@ export type EmailValidationHandlerConfig = {
   paths: string[];
   /** The form field name containing the email. Default: `"email"`. */
   fieldName?: string;
-  /** Return 422 for emails with state "invalid". Default: `true`. */
-  rejectInvalid?: boolean;
-  /** Also reject emails with state "risky". Default: `false`. */
-  rejectRisky?: boolean;
+  /**
+   * Which validation states to reject with a 422 response.
+   * Default: `["email_invalid"]`
+   */
+  rejectStates?: ValidationState[];
   /** Your Truelist API key. Defaults to `process.env.TRUELIST_API_KEY`. */
   apiKey?: string;
   /** Base URL for the Truelist API. Defaults to `https://api.truelist.io`. */
@@ -59,18 +63,27 @@ export type ValidateFormSubmissionOptions = {
 
 /**
  * The result returned by the `validateEmail` server helper.
- * Extends the core SDK's `ValidationResult` with a convenience `isValid` flag.
+ * Extends the core SDK's `ValidationResult` with convenience methods.
  */
 export type EmailValidationResult = {
   email: string;
+  domain: string;
+  canonical: string;
+  mxRecord: string | null;
+  firstName: string | null;
+  lastName: string | null;
   state: ValidationState;
-  subState: ValidationSubState;
-  freeEmail: boolean;
-  role: boolean;
-  disposable: boolean;
+  subState: string;
+  verifiedAt: string;
   suggestion: string | null;
-  /** Convenience flag: `true` when the email passed validation (respects `rejectRisky`). */
+  /** Convenience: `true` when `state === "ok"`. */
   isValid: boolean;
+  /** Convenience: `true` when `state === "email_invalid"`. */
+  isInvalid: boolean;
+  /** Convenience: `true` when `subState === "is_disposable"`. */
+  isDisposable: boolean;
+  /** Convenience: `true` when `subState === "is_role"`. */
+  isRole: boolean;
 };
 
 /**

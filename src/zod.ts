@@ -10,9 +10,9 @@ const DEFAULT_API_KEY_ENV = "TRUELIST_API_KEY";
 export type TruelistEmailOptions = {
   /**
    * Which validation states to reject.
-   * Default: `["invalid"]`
+   * Default: `["email_invalid"]`
    *
-   * Example: also reject risky emails with `["invalid", "risky"]`.
+   * Example: also reject risky emails with `["email_invalid", "risky"]`.
    */
   rejectStates?: ValidationState[];
 
@@ -60,13 +60,13 @@ export type TruelistEmailOptions = {
  * @example Reject risky emails too
  * ```ts
  * const schema = z.object({
- *   email: truelistEmail({ rejectStates: ["invalid", "risky"] }),
+ *   email: truelistEmail({ rejectStates: ["email_invalid", "risky"] }),
  * });
  * ```
  */
 export function truelistEmail(options?: TruelistEmailOptions) {
   const {
-    rejectStates = ["invalid"],
+    rejectStates = ["email_invalid"],
     message = "This email address is not valid.",
     apiKey: configApiKey,
     baseUrl,
@@ -79,7 +79,7 @@ export function truelistEmail(options?: TruelistEmailOptions) {
     .email("Please enter a valid email address.")
     .refine(
       async (email) => {
-        // Check API key FIRST — this must throw, not be caught
+        // Check API key FIRST -- this must throw, not be caught
         const apiKey = configApiKey ?? process.env[DEFAULT_API_KEY_ENV];
         if (!apiKey) {
           throw new Error(

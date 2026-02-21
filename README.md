@@ -40,29 +40,36 @@ export async function checkEmail(formData: FormData) {
 
 ### `validateEmail(email, config?)`
 
-Validate a single email address using the Truelist server-side API (`POST /api/v1/verify`, 10 req/s).
+Validate a single email address using the Truelist server-side API (`POST /api/v1/verify_inline`).
 
 ```ts
 import { validateEmail } from "@truelist/nextjs/server";
 
 const result = await validateEmail("user@example.com");
 
-result.state;      // "valid" | "invalid" | "risky" | "unknown"
-result.subState;   // "ok" | "disposable_address" | "role_address" | ...
-result.freeEmail;  // true
-result.role;       // false
-result.disposable; // false
-result.suggestion; // null or "user@gmail.com"
-result.isValid;    // true (convenience flag respecting rejectRisky)
+result.email;       // "user@example.com"
+result.domain;      // "example.com"
+result.canonical;   // "user"
+result.mxRecord;    // "mx.example.com" or null
+result.firstName;   // null
+result.lastName;    // null
+result.state;       // "ok" | "email_invalid" | "risky" | "unknown" | "accept_all"
+result.subState;    // "email_ok" | "is_disposable" | "is_role" | ...
+result.verifiedAt;  // "2026-02-21T10:00:00.000Z"
+result.suggestion;  // null or "user@gmail.com"
+result.isValid;     // true (convenience: state === "ok")
+result.isInvalid;   // false (convenience: state === "email_invalid")
+result.isDisposable;// false (convenience: subState === "is_disposable")
+result.isRole;      // false (convenience: subState === "is_role")
 ```
 
 #### Options
 
 ```ts
 const result = await validateEmail("user@example.com", {
-  apiKey: "custom-key",      // Override env var
-  baseUrl: "https://...",    // Custom API URL
-  rejectRisky: true,         // Treat "risky" as invalid
+  apiKey: "custom-key",                      // Override env var
+  baseUrl: "https://...",                    // Custom API URL
+  rejectStates: ["email_invalid", "risky"],  // States that set isValid=false
 });
 ```
 
@@ -74,7 +81,7 @@ Create a pre-configured validator for reuse across multiple Server Actions.
 import { createEmailValidator } from "@truelist/nextjs/server";
 
 const validate = createEmailValidator({
-  rejectRisky: true,
+  rejectStates: ["email_invalid", "risky"],
 });
 
 // Use in any Server Action:
@@ -103,8 +110,7 @@ import type { NextRequest } from "next/server";
 
 const validate = createValidationHandler({
   paths: ["/api/signup"],
-  rejectInvalid: true,       // return 422 for invalid emails (default)
-  rejectRisky: false,        // also reject risky emails (default: false)
+  rejectStates: ["email_invalid"],  // default
 });
 
 export async function POST(request: NextRequest) {
@@ -122,7 +128,7 @@ When an invalid email is detected, the handler returns:
 {
   "error": "Invalid email",
   "details": {
-    "state": "invalid",
+    "state": "email_invalid",
     "subState": "failed_no_mailbox",
     "suggestion": null
   }
@@ -137,8 +143,7 @@ with HTTP status `422 Unprocessable Entity`.
 |--------|------|---------|-------------|
 | `paths` | `string[]` | (required) | Route path prefixes to validate (uses `startsWith` matching) |
 | `fieldName` | `string` | `"email"` | Form field name containing the email |
-| `rejectInvalid` | `boolean` | `true` | Return 422 for `"invalid"` emails |
-| `rejectRisky` | `boolean` | `false` | Also reject `"risky"` emails |
+| `rejectStates` | `ValidationState[]` | `["email_invalid"]` | States that trigger a 422 response |
 | `apiKey` | `string` | `process.env.TRUELIST_API_KEY` | API key override |
 | `baseUrl` | `string` | `https://api.truelist.io` | API base URL override |
 | `timeout` | `number` | `10000` | Fetch timeout in milliseconds |
@@ -158,14 +163,14 @@ export async function POST(request: NextRequest) {
     fieldName: "email",
   });
 
-  if (result?.state === "invalid") {
+  if (result?.state === "email_invalid") {
     return NextResponse.json(
       { error: "Invalid email", suggestion: result.suggestion },
       { status: 422 }
     );
   }
 
-  if (result?.state === "risky" && result.disposable) {
+  if (result?.subState === "is_disposable") {
     return NextResponse.json(
       { error: "Disposable emails are not allowed" },
       { status: 422 }
@@ -207,7 +212,7 @@ export async function signup(formData: FormData) {
 
 ```ts
 truelistEmail({
-  rejectStates: ["invalid", "risky"], // default: ["invalid"]
+  rejectStates: ["email_invalid", "risky"], // default: ["email_invalid"]
   message: "This email cannot receive mail.", // custom error message
   apiKey: "override-key",             // default: process.env.TRUELIST_API_KEY
   baseUrl: "https://...",             // custom API URL
@@ -228,13 +233,13 @@ If the Truelist API is unreachable, validation passes through (fail-open) to avo
 
 All functions accept an `apiKey` config option to override the environment variable.
 
-### API Endpoints Used
+### API Endpoint Used
 
-| Module | Endpoint | Rate Limit | Runtime |
-|--------|----------|------------|---------|
-| `@truelist/nextjs/server` | `POST /api/v1/verify` | 10 req/s | Node.js |
-| `@truelist/nextjs/middleware` | `POST /api/v1/form_verify` | 60 req/min | Node.js or Edge |
-| `@truelist/nextjs/zod` | `POST /api/v1/verify` | 10 req/s | Node.js |
+| Module | Endpoint | Runtime |
+|--------|----------|---------|
+| `@truelist/nextjs/server` | `POST /api/v1/verify_inline?email=...` | Node.js |
+| `@truelist/nextjs/middleware` | `POST /api/v1/verify_inline?email=...` | Node.js or Edge |
+| `@truelist/nextjs/zod` | `POST /api/v1/verify_inline?email=...` | Node.js |
 
 ## Types
 
@@ -258,11 +263,11 @@ import type {
 
 ### `ValidationState`
 
-`"valid"` | `"invalid"` | `"risky"` | `"unknown"`
+`"ok"` | `"email_invalid"` | `"risky"` | `"unknown"` | `"accept_all"`
 
 ### `ValidationSubState`
 
-`"ok"` | `"accept_all"` | `"disposable_address"` | `"role_address"` | `"failed_mx_check"` | `"failed_spam_trap"` | `"failed_no_mailbox"` | `"failed_greylisted"` | `"failed_syntax_check"` | `"unknown"`
+`"email_ok"` | `"accept_all"` | `"is_disposable"` | `"is_role"` | `"failed_smtp_check"` | `"failed_mx_check"` | `"failed_spam_trap"` | `"failed_no_mailbox"` | `"failed_greylisted"` | `"failed_syntax_check"` | `"unknown_error"`
 
 ## Related Packages
 
