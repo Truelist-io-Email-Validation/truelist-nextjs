@@ -4,7 +4,7 @@
  * Uses raw `fetch` (no Node.js-specific APIs) so it stays Edge-compatible
  * if used inside an Edge Route Handler.
  *
- * Calls the `/api/v1/form_verify` endpoint (60 req/min rate limit).
+ * Calls the `POST /api/v1/verify_inline?email=...` endpoint.
  */
 
 import { NextResponse } from "next/server";
@@ -15,25 +15,33 @@ import type {
   EmailValidationErrorResponse,
 } from "./types";
 import { AuthenticationError } from "truelist";
-import type { ValidationResult, ValidationSubState } from "truelist";
+import type { ValidationResult, ValidationState, ValidationSubState } from "truelist";
 
 const DEFAULT_BASE_URL = "https://api.truelist.io";
 const DEFAULT_FIELD_NAME = "email";
 const DEFAULT_API_KEY_ENV = "TRUELIST_API_KEY";
 const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_REJECT_STATES: ValidationState[] = ["email_invalid"];
 
 /**
- * Raw API response from the form_verify endpoint.
+ * Raw API response from the verify_inline endpoint.
  * Defined here to avoid importing Node-only modules in Edge Runtime.
  */
-type ApiFormVerifyResponse = {
-  email: string;
-  state: "valid" | "invalid" | "risky" | "unknown";
-  sub_state: ValidationSubState;
-  free_email: boolean;
-  role: boolean;
-  disposable: boolean;
-  suggestion: string | null;
+type ApiValidationEmail = {
+  address: string;
+  domain: string;
+  canonical: string;
+  mx_record: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email_state: ValidationState;
+  email_sub_state: ValidationSubState;
+  verified_at: string;
+  did_you_mean: string | null;
+};
+
+type ApiValidationResponse = {
+  emails: ApiValidationEmail[];
 };
 
 function getApiKey(configApiKey?: string): string {
@@ -47,16 +55,17 @@ function getApiKey(configApiKey?: string): string {
 }
 
 /**
- * Call the Truelist form_verify endpoint using raw fetch (Edge-compatible).
+ * Call the Truelist verify_inline endpoint using raw fetch (Edge-compatible).
  * Includes an AbortController timeout to prevent hanging requests.
  */
-async function formVerify(
+async function verifyInline(
   email: string,
   apiKey: string,
   baseUrl: string,
   timeoutMs: number
 ): Promise<ValidationResult> {
-  const url = `${baseUrl}/api/v1/form_verify`;
+  const queryParam = encodeURIComponent(email);
+  const url = `${baseUrl}/api/v1/verify_inline?email=${queryParam}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -65,10 +74,9 @@ async function formVerify(
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ email }),
       signal: controller.signal,
     });
 
@@ -82,17 +90,21 @@ async function formVerify(
       );
     }
 
-    const data: ApiFormVerifyResponse =
-      (await response.json()) as ApiFormVerifyResponse;
+    const data: ApiValidationResponse =
+      (await response.json()) as ApiValidationResponse;
 
+    const entry = data.emails[0];
     return {
-      email: data.email,
-      state: data.state,
-      subState: data.sub_state,
-      freeEmail: data.free_email,
-      role: data.role,
-      disposable: data.disposable,
-      suggestion: data.suggestion,
+      email: entry.address,
+      domain: entry.domain,
+      canonical: entry.canonical,
+      mxRecord: entry.mx_record,
+      firstName: entry.first_name,
+      lastName: entry.last_name,
+      state: entry.email_state,
+      subState: entry.email_sub_state,
+      verifiedAt: entry.verified_at,
+      suggestion: entry.did_you_mean,
     };
   } finally {
     clearTimeout(timer);
@@ -150,7 +162,7 @@ async function extractEmail(
  * export async function POST(request: NextRequest) {
  *   const result = await validateFormSubmission(request, { fieldName: "email" });
  *
- *   if (result?.state === "invalid") {
+ *   if (result?.state === "email_invalid") {
  *     return NextResponse.json(
  *       { error: "Invalid email" },
  *       { status: 422 }
@@ -176,15 +188,15 @@ export async function validateFormSubmission(
     return null;
   }
 
-  return formVerify(email, apiKey, baseUrl, timeoutMs);
+  return verifyInline(email, apiKey, baseUrl, timeoutMs);
 }
 
 /**
  * Create a Next.js Route Handler (POST) that validates email fields
  * in requests to matching paths.
  *
- * Invalid emails receive a 422 JSON response. Valid/risky/unknown emails
- * pass through to the next handler via `NextResponse.next()`.
+ * Emails with rejected states receive a 422 JSON response.
+ * Other emails pass through to the next handler via `NextResponse.next()`.
  *
  * Uses `pathname.startsWith()` for path matching so nested routes are covered.
  *
@@ -197,15 +209,14 @@ export async function validateFormSubmission(
  *
  * const validate = createValidationHandler({
  *   paths: ["/api/signup"],
- *   rejectInvalid: true,
- *   rejectRisky: false,
+ *   rejectStates: ["email_invalid"],
  * });
  *
  * export async function POST(request: NextRequest) {
  *   const blocked = await validate(request);
  *   if (blocked) return blocked; // 422 response
  *
- *   // Email is valid — continue with your logic
+ *   // Email is valid -- continue with your logic
  *   const body = await request.json();
  *   return NextResponse.json({ success: true });
  * }
@@ -217,12 +228,13 @@ export function createValidationHandler(
   const {
     paths,
     fieldName = DEFAULT_FIELD_NAME,
-    rejectInvalid = true,
-    rejectRisky = false,
+    rejectStates = DEFAULT_REJECT_STATES,
     apiKey: configApiKey,
     baseUrl: configBaseUrl,
     timeout: configTimeout,
   } = config;
+
+  const rejectedStates = new Set<string>(rejectStates);
 
   return async (request: NextRequest): Promise<NextResponse | null> => {
     // Only validate if the pathname matches one of the configured paths
@@ -238,17 +250,13 @@ export function createValidationHandler(
 
     const email = await extractEmail(request, fieldName);
 
-    // No email found in the request body — pass through
+    // No email found in the request body -- pass through
     if (!email) {
       return null;
     }
 
     try {
-      const result = await formVerify(email, apiKey, baseUrl, timeoutMs);
-
-      const rejectedStates = new Set<string>();
-      if (rejectInvalid) rejectedStates.add("invalid");
-      if (rejectRisky) rejectedStates.add("risky");
+      const result = await verifyInline(email, apiKey, baseUrl, timeoutMs);
 
       if (rejectedStates.has(result.state)) {
         const errorBody: EmailValidationErrorResponse = {
