@@ -1,5 +1,6 @@
 # @truelist/nextjs
 
+[![Free tier](https://img.shields.io/badge/free_plan-100_validations-4A7C59?style=flat-square)](https://truelist.io/pricing)
 Email validation for Next.js -- Server Actions, Route Handlers, and Zod integration powered by [Truelist.io](https://truelist.io).
 
 [![npm version](https://img.shields.io/npm/v/@truelist/nextjs.svg)](https://www.npmjs.com/package/@truelist/nextjs)
@@ -17,6 +18,9 @@ Set your API key in `.env.local`:
 ```env
 TRUELIST_API_KEY=your-api-key
 ```
+
+> **Start free** — 100 validations + 10 enhanced credits, no credit card required.
+> [Get your API key →](https://app.truelist.io/signup?utm_source=github&utm_medium=readme&utm_campaign=free-plan&utm_content=truelist-nextjs)
 
 ## Quick Start with Server Actions
 
@@ -274,6 +278,10 @@ import type {
 - [`truelist`](https://www.npmjs.com/package/truelist) -- Node.js SDK
 - [`@truelist/react`](https://www.npmjs.com/package/@truelist/react) -- React hooks and components
 
+
+## Getting Started
+
+Sign up for a [free Truelist account](https://app.truelist.io/signup?utm_source=github&utm_medium=readme&utm_campaign=free-plan&utm_content=truelist-nextjs) to get your API key. The free plan includes 100 validations and 10 enhanced credits — no credit card required.
 ## License
 
 MIT
